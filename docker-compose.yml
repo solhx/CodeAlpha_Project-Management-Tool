@@ -1,0 +1,48 @@
+# docker-compose.yml (root)
+version: '3.9'
+
+services:
+  mongo:
+    image: mongo:7
+    container_name: proflow_mongo
+    restart: always
+    ports:
+      - '27017:27017'
+    volumes:
+      - mongo_data:/data/db
+    environment:
+      MONGO_INITDB_DATABASE: proflow
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: proflow_backend
+    restart: always
+    ports:
+      - '5000:5000'
+    env_file:
+      - ./backend/.env
+    environment:
+      MONGODB_URI: mongodb://mongo:27017/proflow
+    depends_on:
+      - mongo
+    volumes:
+      - ./backend:/app
+      - /app/node_modules
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: proflow_frontend
+    restart: always
+    ports:
+      - '3000:3000'
+    env_file:
+      - ./frontend/.env.local
+    depends_on:
+      - backend
+
+volumes:
+  mongo_data:
