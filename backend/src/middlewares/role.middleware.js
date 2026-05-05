@@ -1,10 +1,14 @@
+//src/middlewares/role.middleware.js
 import Project from '../models/Project.model.js';
-import { ApiError } from '../utils/ApiError.js';
+import { ApiError }    from '../utils/ApiError.js';
 import { asyncHandler } from '../utils/asyncHandler.js';
 
-// ─────────────────────────────────────────────────────
-//  SYSTEM ROLE GUARD  (user.role === 'admin' | 'user')
-// ─────────────────────────────────────────────────────
+// ── Role Hierarchy ─────────────────────────────────────────────────────────────
+const HIERARCHY = { owner: 4, admin: 3, member: 2, viewer: 1 };
+
+// ── SYSTEM ROLE GUARD ──────────────────────────────────────────────────────────
+// Checks req.user.role (global role: 'admin' | 'user')
+// Usage: requireRole('admin')
 export const requireRole = (...roles) =>
   (req, res, next) => {
     if (!req.user) {
@@ -19,15 +23,17 @@ export const requireRole = (...roles) =>
     next();
   };
 
-// ─────────────────────────────────────────────────────
-//  PROJECT ROLE GUARD  (owner | admin | member | viewer)
-// ─────────────────────────────────────────────────────
+// ── PROJECT ROLE GUARD ─────────────────────────────────────────────────────────
+// Checks the user's role within a specific project using hierarchy.
+// Usage: requireProjectRole('admin')        → admin OR owner can pass
+//        requireProjectRole('member')       → member, admin, or owner can pass
+//        requireProjectRole('admin','owner') → same as requireProjectRole('admin')
 export const requireProjectRole = (...projectRoles) =>
   asyncHandler(async (req, res, next) => {
     const projectId =
-      req.params.id         ||
-      req.params.projectId  ||
-      req.body.projectId    ||
+      req.params.id        ||
+      req.params.projectId ||
+      req.body.projectId   ||
       req.query.projectId;
 
     if (!projectId) {
@@ -53,8 +59,7 @@ export const requireProjectRole = (...projectRoles) =>
       throw new ApiError(403, 'You are not a member of this project');
     }
 
-    // Role hierarchy: owner > admin > member > viewer
-    const HIERARCHY = { owner: 4, admin: 3, member: 2, viewer: 1 };
+    // Resolve the minimum hierarchy level required
     const minRequired = Math.min(
       ...projectRoles.map((r) => HIERARCHY[r] || 0)
     );
@@ -72,9 +77,10 @@ export const requireProjectRole = (...projectRoles) =>
     next();
   });
 
-// ─────────────────────────────────────────────────────
-//  OWNERSHIP GUARD  (must be the creator of a resource)
-// ─────────────────────────────────────────────────────
+// ── OWNERSHIP GUARD ────────────────────────────────────────────────────────────
+// Ensures the requesting user created/owns the resource.
+// System admins bypass this check.
+// Usage: requireOwnership(Task) or requireOwnership(Comment, 'commentId')
 export const requireOwnership = (Model, idParam = 'id') =>
   asyncHandler(async (req, res, next) => {
     const resourceId = req.params[idParam];
@@ -89,8 +95,8 @@ export const requireOwnership = (Model, idParam = 'id') =>
       resource.author?.toString()    ||
       resource.owner?.toString();
 
-    const isOwner   = ownerId === req.user._id.toString();
-    const isAdmin   = req.user.role === 'admin';
+    const isOwner = ownerId === req.user._id.toString();
+    const isAdmin = req.user.role === 'admin';
 
     if (!isOwner && !isAdmin) {
       throw new ApiError(403, 'You do not own this resource');
@@ -100,9 +106,8 @@ export const requireOwnership = (Model, idParam = 'id') =>
     next();
   });
 
-// ─────────────────────────────────────────────────────
-//  ADMIN ONLY GUARD
-// ─────────────────────────────────────────────────────
+// ── ADMIN ONLY GUARD ───────────────────────────────────────────────────────────
+// Shorthand for system-level admin operations.
 export const adminOnly = (req, res, next) => {
   if (!req.user) throw new ApiError(401, 'Authentication required');
   if (req.user.role !== 'admin') {
@@ -111,9 +116,9 @@ export const adminOnly = (req, res, next) => {
   next();
 };
 
-// ─────────────────────────────────────────────────────
-//  PROJECT MEMBERSHIP CHECK  (any role — just member)
-// ─────────────────────────────────────────────────────
+// ── PROJECT MEMBERSHIP CHECK ───────────────────────────────────────────────────
+// Passes for any member regardless of role (owner, admin, member, viewer).
+// Silently skips if no projectId is available in the request context.
 export const requireProjectMembership = asyncHandler(
   async (req, res, next) => {
     const projectId =
@@ -121,7 +126,8 @@ export const requireProjectMembership = asyncHandler(
       req.body.projectId   ||
       req.query.projectId;
 
-    if (!projectId) return next(); // skip if no project context
+    // No project context — skip (used on routes where project is optional)
+    if (!projectId) return next();
 
     const project = await Project.findById(projectId).lean();
     if (!project) throw new ApiError(404, 'Project not found');

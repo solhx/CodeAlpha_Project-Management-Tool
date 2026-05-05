@@ -1,25 +1,63 @@
-//frontend/src/components/task/CreateTaskModal.jsx
+// frontend/src/components/task/CreateTaskModal.jsx
 'use client';
-import { useState } from 'react';
-import { useParams } from 'next/navigation'; // ✅ ADD THIS
+import { useState, useEffect } from 'react';
+import { useParams }           from 'next/navigation';
 import { useCreateTaskMutation } from '@/store/api/taskApi';
+import api from '@/lib/axios';
 
 const PRIORITIES = ['none', 'low', 'medium', 'high', 'critical'];
 const PRIORITY_COLORS = {
   critical: '🔴', high: '🟠', medium: '🟡', low: '🟢', none: '⚪',
 };
 
-export default function CreateTaskModal({ columnId, boardId, onClose }) {
-  const { projectId } = useParams(); // ✅ Extract projectId from the URL
-                                     // /projects/[projectId]/boards/[boardId]
+export default function CreateTaskModal({ columnId, boardId, projectId: propProjectId, onClose }) {
+  const params    = useParams();
+  const projectId = propProjectId || params?.projectId;
 
-  const [title,       setTitle      ] = useState('');
-  const [description, setDescription] = useState('');
-  const [priority,    setPriority   ] = useState('none');
-  const [dueDate,     setDueDate    ] = useState('');
-  const [error,       setError      ] = useState('');
+  const [title,             setTitle            ] = useState('');
+  const [description,       setDescription      ] = useState('');
+  const [priority,          setPriority         ] = useState('none');
+  const [dueDate,           setDueDate          ] = useState('');
+  const [error,             setError            ] = useState('');
+  const [members,           setMembers          ] = useState([]);
+  const [selectedAssignees, setSelectedAssignees] = useState([]);
+  const [loadingMembers,    setLoadingMembers   ] = useState(false);
 
   const [createTask, { isLoading }] = useCreateTaskMutation();
+
+  // ── Load project members on mount ──────────────────────────────────────────
+  useEffect(() => {
+    if (!projectId) return;
+    setLoadingMembers(true);
+    api.get(`/projects/${projectId}`)
+      .then(({ data }) => {
+        const raw = data.data?.project?.members || [];
+
+        // members[].user must be a populated object (ensure backend populates it)
+        const memberUsers = raw
+          .map((m) => (typeof m.user === 'object' && m.user !== null ? m.user : null))
+          .filter(Boolean);
+
+        // Also include the owner if populated
+        const owner = data.data?.project?.owner;
+        if (owner && typeof owner === 'object') {
+          const alreadyIn = memberUsers.some((u) => u._id === owner._id);
+          if (!alreadyIn) memberUsers.unshift(owner);
+        }
+
+        setMembers(memberUsers);
+      })
+      .catch((err) => console.error('Failed to load members:', err))
+      .finally(() => setLoadingMembers(false));
+  }, [projectId]);
+
+  const toggleAssignee = (userId) => {
+    setSelectedAssignees((prev) =>
+      prev.includes(userId)
+        ? prev.filter((id) => id !== userId)
+        : [...prev, userId]
+    );
+  };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -27,7 +65,6 @@ export default function CreateTaskModal({ columnId, boardId, onClose }) {
       setError('Task title is required');
       return;
     }
-
     try {
       await createTask({
         title      : title.trim(),
@@ -36,7 +73,8 @@ export default function CreateTaskModal({ columnId, boardId, onClose }) {
         dueDate    : dueDate || undefined,
         columnId,
         boardId,
-        projectId, // ✅ FIX: Now included → MongoDB validation passes
+        projectId,
+        assignees  : selectedAssignees,
       }).unwrap();
       onClose();
     } catch (err) {
@@ -68,7 +106,7 @@ export default function CreateTaskModal({ columnId, boardId, onClose }) {
         </div>
 
         {/* ── Form ── */}
-        <form onSubmit={handleSubmit} className="p-6 space-y-4">
+        <form onSubmit={handleSubmit} className="p-6 space-y-4 overflow-y-auto max-h-[80vh]">
 
           {/* Error Banner */}
           {error && (
@@ -152,7 +190,71 @@ export default function CreateTaskModal({ columnId, boardId, onClose }) {
             </div>
           </div>
 
-          {/* Actions */}
+          {/* ── Assignees ── */}
+          <div>
+            <label className="block text-sm font-semibold text-slate-700 mb-2">
+              Assignees{' '}
+              <span className="text-slate-400 font-normal">(optional)</span>
+            </label>
+
+            {loadingMembers ? (
+              <div className="flex items-center gap-2 text-xs text-slate-400">
+                <div className="w-3 h-3 border-2 border-slate-300 border-t-indigo-500 
+                                rounded-full animate-spin" />
+                Loading members...
+              </div>
+            ) : members.length === 0 ? (
+              <p className="text-xs text-slate-400 italic">
+                No members found in this project.
+              </p>
+            ) : (
+              <div className="flex flex-wrap gap-2">
+                {members.map((member) => {
+                  const id         = member._id;
+                  const name       = member.name || 'Unknown';
+                  const avatarUrl  =
+                    member.avatar?.url ||
+                    `https://ui-avatars.com/api/?name=${encodeURIComponent(name)}&size=28`;
+                  const isSelected = selectedAssignees.includes(id);
+
+                  return (
+                    <button
+                      key={id}
+                      type="button"
+                      onClick={() => toggleAssignee(id)}
+                      title={member.email || name}
+                      className={`
+                        flex items-center gap-2 px-3 py-1.5 rounded-full text-sm
+                        border-2 transition-all
+                        ${isSelected
+                          ? 'border-indigo-500 bg-indigo-50 text-indigo-700'
+                          : 'border-slate-200 text-slate-600 hover:border-slate-300'}
+                      `}
+                    >
+                      <img
+                        src={avatarUrl}
+                        className="w-5 h-5 rounded-full"
+                        alt={name}
+                      />
+                      {name.split(' ')[0]}
+                      {isSelected && (
+                        <span className="text-indigo-600 text-xs">✓</span>
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+
+            {selectedAssignees.length > 0 && (
+              <p className="text-xs text-indigo-600 mt-2">
+                {selectedAssignees.length} member
+                {selectedAssignees.length > 1 ? 's' : ''} selected
+              </p>
+            )}
+          </div>
+
+          {/* ── Actions ── */}
           <div className="flex gap-3 pt-2">
             <button
               type="button"

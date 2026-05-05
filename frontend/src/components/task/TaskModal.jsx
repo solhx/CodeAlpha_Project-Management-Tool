@@ -1,11 +1,12 @@
+//src/components/task/TaskModal.jsx
 'use client';
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import { useUpdateTaskMutation, useDeleteTaskMutation } from '@/store/api/taskApi';
 import { useGetCommentsQuery } from '@/store/api/commentApi';
-// ✅ FIX 2: Removed unused useCreateCommentMutation import
-// ✅ FIX 3: Removed unused useSelector + selectCurrentUser import
-import CommentList from '../comment/CommentList';
-import TaskLabels  from './TaskLabels';
+import CommentList  from '../comment/CommentList';
+import TaskLabels   from './TaskLabels';
+import TaskAssignee from './TaskAssignee';  // ✅ ADDED
+import api          from '@/lib/axios';     // ✅ ADDED for activity log
 
 const PRIORITIES = ['none', 'low', 'medium', 'high', 'critical'];
 const PRIORITY_COLORS = {
@@ -26,16 +27,6 @@ export default function TaskModal({ task, onClose }) {
   const [deleteTask]                            = useDeleteTaskMutation();
   const { data: commentsData }                  = useGetCommentsQuery(task._id);
 
-  // ✅ FIX 1: Accept explicit overrides so callers can pass the NEW value
-  // directly instead of relying on React state (which is async).
-  //
-  // BEFORE (broken):
-  //   setPriority('high');   ← state update is queued, not instant
-  //   handleSave();          ← reads priority from closure = still 'none' 💥
-  //
-  // AFTER (fixed):
-  //   handleSave({ priority: 'high' })  ← passes new value directly ✅
-  //   setPriority('high');              ← updates UI state for display
   const handleSave = useCallback(async (overrides = {}) => {
     try {
       await updateTask({
@@ -44,8 +35,6 @@ export default function TaskModal({ task, onClose }) {
         description,
         priority,
         dueDate    : dueDate || null,
-        // overrides WINS over stale closure values
-        // e.g. handleSave({ priority: 'high' }) saves 'high' immediately
         ...overrides,
       }).unwrap();
     } catch (err) {
@@ -54,7 +43,7 @@ export default function TaskModal({ task, onClose }) {
   }, [task._id, title, description, priority, dueDate, updateTask]);
 
   const handleDelete = async () => {
-    if (!window.confirm('Delete this task?')) return;
+    if (!window.confirm('Delete this task? This action cannot be undone.')) return;
     try {
       await deleteTask(task._id).unwrap();
       onClose();
@@ -87,12 +76,16 @@ export default function TaskModal({ task, onClose }) {
                 onChange={(e) => setTitle(e.target.value)}
                 onBlur={() => {
                   setIsEditingTitle(false);
-                  handleSave(); // title state is already updated here ✅
+                  handleSave();
                 }}
                 onKeyDown={(e) => {
                   if (e.key === 'Enter') {
                     setIsEditingTitle(false);
                     handleSave();
+                  }
+                  if (e.key === 'Escape') {
+                    setIsEditingTitle(false);
+                    setTitle(task.title);
                   }
                 }}
                 className="text-xl font-bold text-slate-800 w-full border-b-2 
@@ -141,7 +134,7 @@ export default function TaskModal({ task, onClose }) {
         {/* ── Body ── */}
         <div className="flex flex-1 overflow-hidden">
 
-          {/* Main Content */}
+          {/* ── Main Content ── */}
           <div className="flex-1 p-6 overflow-y-auto space-y-6">
 
             {/* Description */}
@@ -152,7 +145,7 @@ export default function TaskModal({ task, onClose }) {
               <textarea
                 value={description}
                 onChange={(e) => setDescription(e.target.value)}
-                onBlur={() => handleSave()} // description state updated by now ✅
+                onBlur={() => handleSave()}
                 rows={4}
                 placeholder="Add a more detailed description..."
                 className="w-full text-sm text-slate-700 border border-slate-200 
@@ -187,41 +180,24 @@ export default function TaskModal({ task, onClose }) {
 
               {activeTab === 'comments'
                 ? <CommentList taskId={task._id} />
-                : <ActivitySection />}
+                : <ActivitySection taskId={task._id} />}
             </div>
           </div>
 
           {/* ── Sidebar Panel ── */}
-          <div className="w-56 border-l border-slate-100 p-5 space-y-5 
-                          overflow-y-auto bg-slate-50">
+          <div className="w-60 border-l border-slate-100 p-5 space-y-5 
+                          overflow-y-auto bg-slate-50 flex-shrink-0">
 
-            {/* Assignees */}
+            {/* ✅ Assignees — now interactive via TaskAssignee */}
             <div>
               <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">
                 Assignees
               </p>
-              <div className="flex flex-wrap gap-1">
-                {task.assignees?.map((u) => (
-                  <div
-                    key={u._id}
-                    className="flex items-center gap-1.5 bg-white border 
-                               border-slate-200 rounded-full px-2 py-1"
-                  >
-                    <img
-                      src={u.avatar?.url ||
-                        `https://ui-avatars.com/api/?name=${encodeURIComponent(u.name)}&size=16`}
-                      className="w-4 h-4 rounded-full"
-                      alt={u.name}
-                    />
-                    <span className="text-xs text-slate-700">
-                      {u.name.split(' ')[0]}
-                    </span>
-                  </div>
-                ))}
-                {(!task.assignees || task.assignees.length === 0) && (
-                  <p className="text-xs text-slate-400">No assignees</p>
-                )}
-              </div>
+              <TaskAssignee
+                taskId={task._id}
+                projectId={task.project?._id || task.project}
+                currentAssignees={task.assignees || []}
+              />
             </div>
 
             {/* Priority */}
@@ -234,7 +210,6 @@ export default function TaskModal({ task, onClose }) {
                 onChange={(e) => {
                   const newPriority = e.target.value;
                   setPriority(newPriority);
-                  // ✅ FIX 1: Pass new value directly — doesn't rely on stale state
                   handleSave({ priority: newPriority });
                 }}
                 className="w-full text-sm border border-slate-200 rounded-lg p-2 
@@ -259,7 +234,6 @@ export default function TaskModal({ task, onClose }) {
                 onChange={(e) => {
                   const newDate = e.target.value;
                   setDueDate(newDate);
-                  // ✅ FIX 1: Pass new value directly — doesn't rely on stale state
                   handleSave({ dueDate: newDate || null });
                 }}
                 className="w-full text-sm border border-slate-200 rounded-lg p-2 
@@ -290,7 +264,7 @@ export default function TaskModal({ task, onClose }) {
                   Saving...
                 </>
               ) : (
-                'Save Changes'
+                '💾 Save Changes'
               )}
             </button>
           </div>
@@ -327,6 +301,12 @@ function ChecklistSection({ task }) {
     await updateTask({ id: task._id, checklist: updated });
   };
 
+  const removeItem = async (index) => {
+    const updated = items.filter((_, i) => i !== index);
+    setItems(updated);
+    await updateTask({ id: task._id, checklist: updated });
+  };
+
   if (items.length === 0 && !newItem.trim()) {
     return (
       <button
@@ -358,19 +338,28 @@ function ChecklistSection({ task }) {
       {/* Items */}
       <div className="space-y-2">
         {items.map((item, i) => (
-          <label key={i} className="flex items-center gap-2 cursor-pointer">
+          <div key={i} className="flex items-center gap-2 group">
             <input
               type="checkbox"
               checked={item.isCompleted}
               onChange={() => toggleItem(i)}
-              className="w-4 h-4 accent-indigo-600 rounded"
+              className="w-4 h-4 accent-indigo-600 rounded flex-shrink-0"
             />
-            <span className={`text-sm ${
+            <span className={`text-sm flex-1 ${
               item.isCompleted ? 'line-through text-slate-400' : 'text-slate-700'
             }`}>
               {item.text}
             </span>
-          </label>
+            {/* ✅ ADDED: Remove checklist item button */}
+            <button
+              onClick={() => removeItem(i)}
+              className="opacity-0 group-hover:opacity-100 text-slate-300 
+                         hover:text-red-400 transition-all text-xs"
+              title="Remove item"
+            >
+              ✕
+            </button>
+          </div>
         ))}
       </div>
 
@@ -388,7 +377,7 @@ function ChecklistSection({ task }) {
           onClick={addItem}
           disabled={!newItem.trim()}
           className="text-sm bg-indigo-600 text-white px-3 py-1.5 rounded-lg 
-                     hover:bg-indigo-700 disabled:opacity-50"
+                     hover:bg-indigo-700 disabled:opacity-50 transition-colors"
         >
           Add
         </button>
@@ -398,10 +387,54 @@ function ChecklistSection({ task }) {
 }
 
 // ─── Activity Section ──────────────────────────────────────────────────────────
-function ActivitySection() {
+function ActivitySection({ taskId }) {
+  const [logs,    setLogs   ] = useState([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    if (!taskId) return;
+    api.get('/activity', { params: { taskId } })
+      .then(({ data }) => setLogs(data.data?.logs || []))
+      .catch(console.error)
+      .finally(() => setLoading(false));
+  }, [taskId]);
+
+  if (loading) return (
+    <div className="flex justify-center py-6">
+      <div className="w-5 h-5 border-2 border-slate-300 border-t-indigo-500 
+                      rounded-full animate-spin" />
+    </div>
+  );
+
+  if (logs.length === 0) return (
+    <p className="text-center text-slate-400 text-sm py-6">No activity yet.</p>
+  );
+
   return (
-    <div className="space-y-3 text-sm text-slate-500">
-      <p className="text-center py-4 text-slate-400">Activity log coming soon...</p>
+    <div className="space-y-4">
+      {logs.map((log) => (
+        <div key={log._id} className="flex items-start gap-3 text-sm">
+          <img
+            src={
+              log.actor?.avatar?.url ||
+              `https://ui-avatars.com/api/?name=${encodeURIComponent(
+                log.actor?.name || '?'
+              )}&size=28`
+            }
+            className="w-7 h-7 rounded-full flex-shrink-0 mt-0.5"
+            alt={log.actor?.name}
+          />
+          <div className="flex-1 min-w-0">
+            <p className="text-slate-700">
+              <span className="font-medium">{log.actor?.name}</span>{' '}
+              <span className="text-slate-500">{log.detail}</span>
+            </p>
+            <p className="text-xs text-slate-400 mt-0.5">
+              {new Date(log.createdAt).toLocaleString()}
+            </p>
+          </div>
+        </div>
+      ))}
     </div>
   );
 }

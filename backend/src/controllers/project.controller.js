@@ -80,22 +80,23 @@ export const getProjects = asyncHandler(async (req, res) => {
 // GET /api/v1/projects/:id
 export const getProjectById = asyncHandler(async (req, res) => {
   const project = await Project.findById(req.params.id)
-    .populate('owner',        'name avatar email')
-    .populate('members.user', 'name avatar email');
+    .populate('owner',          'name email avatar')
+    .populate('members.user',   'name email avatar');
 
   if (!project) throw new ApiError(404, 'Project not found');
 
+  // Optional: check membership before returning
+  const isOwner = project.owner._id.toString() === req.user._id.toString();
   const isMember = project.members.some(
     (m) => m.user._id.toString() === req.user._id.toString()
   );
-  const isOwner = project.owner._id.toString() === req.user._id.toString();
-  if (!isMember && !isOwner) throw new ApiError(403, 'Access denied');
 
-  const boards = await Board.find({ project: req.params.id, isArchived: false });
+  if (!isOwner && !isMember && project.isPrivate) {
+    throw new ApiError(403, 'You do not have access to this project');
+  }
 
-  return res.status(200).json(new ApiResponse(200, { project, boards }));
+  return res.status(200).json(new ApiResponse(200, { project }));
 });
-
 // POST /api/v1/projects
 export const createProject = asyncHandler(async (req, res) => {
   const { name, description, color, icon, isPrivate, dueDate, tags } = req.body;

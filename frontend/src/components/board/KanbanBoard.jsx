@@ -8,8 +8,9 @@ import {
   defaultDropAnimationSideEffects,
 } from '@dnd-kit/core';
 import { sortableKeyboardCoordinates } from '@dnd-kit/sortable';
-import KanbanColumn from './KanbanColumn';
-import TaskCard     from './TaskCard';
+import KanbanColumn    from './KanbanColumn';
+import TaskCard        from './TaskCard';
+import AddColumnModal  from './AddColumnModal'; // ✅ ADDED
 import { useMoveTaskMutation } from '@/store/api/taskApi';
 
 const getColumnId = (column) => {
@@ -19,37 +20,24 @@ const getColumnId = (column) => {
 };
 
 export default function KanbanBoard({ board, columns, tasks }) {
-  const [activeTask,    setActiveTask   ] = useState(null);
-  const [localColumns,  setLocalColumns ] = useState(columns);
-  const [localTasks,    setLocalTasks   ] = useState(tasks);
+  const [activeTask,     setActiveTask    ] = useState(null);
+  const [localColumns,   setLocalColumns  ] = useState(columns);
+  const [localTasks,     setLocalTasks    ] = useState(tasks);
+  const [showAddColumn,  setShowAddColumn ] = useState(false); // ✅ ADDED
+
   const [moveTask] = useMoveTaskMutation();
 
-  // ✅ FIX: Sync localColumns when the board refetches (e.g. new column added)
-  // Without this, column changes from the server are never reflected locally.
+  // Sync localColumns when board refetches
   useEffect(() => {
     setLocalColumns(columns);
   }, [columns]);
 
-  // ✅ FIX: This is the PRIMARY fix for Issue 3 — "task requires page reload".
-  //
-  // PROBLEM: useState(tasks) only runs on first render. When createTask fires:
-  //   1. RTK Query invalidates the board cache
-  //   2. getBoardByIdQuery refetches → BoardPage receives new `tasks` prop
-  //   3. KanbanBoard receives new `tasks` prop
-  //   4. BUT localTasks is still the OLD useState value — it NEVER syncs!
-  //
-  // FIX: useEffect watches `tasks` prop and syncs localTasks whenever it changes.
-  //
-  // GUARD: Skip sync while dragging (activeTask !== null) — if the server responds
-  // during a drag, we don't want to overwrite the optimistic column assignment and
-  // cause the dragged card to jump back to its original column mid-gesture.
+  // Sync localTasks when board refetches — skip during active drag
   useEffect(() => {
     if (!activeTask) {
       setLocalTasks(tasks);
     }
   }, [tasks]); // eslint-disable-line react-hooks/exhaustive-deps
-  // Note: activeTask intentionally omitted from deps — we only want this to fire
-  // when `tasks` changes, not when drag starts/ends.
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
@@ -72,7 +60,6 @@ export default function KanbanBoard({ board, columns, tasks }) {
     const overContainer   = findContainer(over.id);
     if (!activeContainer || !overContainer || activeContainer === overContainer) return;
 
-    // Optimistically move task to new column in local state
     setLocalTasks((prev) =>
       prev.map((t) =>
         t._id === active.id ? { ...t, column: overContainer } : t
@@ -81,8 +68,7 @@ export default function KanbanBoard({ board, columns, tasks }) {
   };
 
   const handleDragEnd = async ({ active, over }) => {
-    setActiveTask(null); // ✅ Clears drag guard — next tasks prop change will sync
-
+    setActiveTask(null);
     if (!over) return;
 
     const activeContainer = findContainer(active.id);
@@ -101,11 +87,7 @@ export default function KanbanBoard({ board, columns, tasks }) {
         targetColumnId: overContainer,
         order         : newOrder,
       }).unwrap();
-      // ✅ On success, localTasks is already correct (set optimistically in handleDragOver).
-      // The board will also refetch via moveTask's onQueryStarted invalidation,
-      // and the useEffect above will sync once activeTask is null.
     } catch (err) {
-      // ✅ On failure, revert to last known server state
       setLocalTasks(tasks);
       console.error('Failed to move task:', err);
     }
@@ -118,6 +100,9 @@ export default function KanbanBoard({ board, columns, tasks }) {
       styles: { active: { opacity: '0' } },
     }),
   };
+
+  // Extract projectId from the board object for passing to columns
+  const projectId = board?.project?._id || board?.project; // ✅ ADDED
 
   return (
     <div className="flex gap-4 overflow-x-auto pb-4 h-full">
@@ -135,6 +120,7 @@ export default function KanbanBoard({ board, columns, tasks }) {
             tasks={localTasks.filter(
               (t) => getColumnId(t.column) === column._id
             )}
+            projectId={projectId} // ✅ ADDED — needed for CreateTaskModal assignees
           />
         ))}
 
@@ -143,12 +129,24 @@ export default function KanbanBoard({ board, columns, tasks }) {
         </DragOverlay>
       </DndContext>
 
-      <button className="shrink-0 w-72 h-12 rounded-xl border-2 border-dashed
-                         border-slate-300 text-slate-400 hover:border-indigo-400
-                         hover:text-indigo-500 transition-all duration-200
-                         flex items-center justify-center gap-2">
+      {/* ✅ Add Column Button — now functional */}
+      <button
+        onClick={() => setShowAddColumn(true)}
+        className="shrink-0 w-72 h-12 rounded-xl border-2 border-dashed
+                   border-slate-300 text-slate-400 hover:border-indigo-400
+                   hover:text-indigo-500 transition-all duration-200
+                   flex items-center justify-center gap-2 self-start"
+      >
         + Add Column
       </button>
+
+      {/* ✅ Add Column Modal */}
+      {showAddColumn && (
+        <AddColumnModal
+          boardId={board._id}
+          onClose={() => setShowAddColumn(false)}
+        />
+      )}
     </div>
   );
 }

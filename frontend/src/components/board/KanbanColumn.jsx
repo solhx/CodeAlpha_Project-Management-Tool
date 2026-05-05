@@ -2,13 +2,9 @@
 'use client';
 import { SortableContext, verticalListSortingStrategy } from '@dnd-kit/sortable';
 import { useDroppable } from '@dnd-kit/core';
-import TaskCard        from './TaskCard';
-import { useState }   from 'react';
-
-// ✅ FIX: Import the CORRECT modal for creating tasks
-// Before: imported TaskModal (edit-only) and called it CreateTaskModal
-// After:  imports the dedicated CreateTaskModal component
-import CreateTaskModal from '../task/CreateTaskModal';
+import TaskCard         from './TaskCard';
+import { useState }    from 'react';
+import CreateTaskModal  from '../task/CreateTaskModal';
 
 const COLUMN_COLORS = {
   'To Do'      : 'bg-slate-100 text-slate-600',
@@ -17,7 +13,7 @@ const COLUMN_COLORS = {
   'Done'       : 'bg-green-50 text-green-600',
 };
 
-export default function KanbanColumn({ column, tasks }) {
+export default function KanbanColumn({ column, tasks, projectId }) { // ✅ Accept projectId
   const [showCreateTask, setShowCreateTask] = useState(false);
   const { setNodeRef } = useDroppable({ id: column._id });
 
@@ -38,12 +34,17 @@ export default function KanbanColumn({ column, tasks }) {
             {column.taskLimit && ` / ${column.taskLimit}`}
           </span>
         </div>
-        <button className="text-slate-400 hover:text-slate-600 text-lg leading-none">
+        <button
+          className="text-slate-400 hover:text-slate-600 text-lg leading-none 
+                     hover:bg-slate-200 w-7 h-7 rounded-lg flex items-center 
+                     justify-center transition-colors"
+          title="Column options"
+        >
           ⋮
         </button>
       </div>
 
-      {/* ── Tasks List ── */}
+      {/* ── Task List ── */}
       <div
         ref={setNodeRef}
         className="flex-1 px-3 pb-3 flex flex-col gap-2 
@@ -57,6 +58,15 @@ export default function KanbanColumn({ column, tasks }) {
             <TaskCard key={task._id} task={task} />
           ))}
         </SortableContext>
+
+        {/* Empty state */}
+        {tasks.length === 0 && (
+          <div className="flex-1 flex items-center justify-center">
+            <p className="text-xs text-slate-300 text-center py-4">
+              No tasks yet
+            </p>
+          </div>
+        )}
       </div>
 
       {/* ── Add Task Button ── */}
@@ -71,13 +81,12 @@ export default function KanbanColumn({ column, tasks }) {
         </button>
       </div>
 
-      {/* ✅ FIX: Now opens CreateTaskModal (not TaskModal)
-               CreateTaskModal handles empty form + createTask mutation
-               TaskModal handles editing an existing task (opened from TaskCard) */}
+      {/* ── Create Task Modal ── */}
       {showCreateTask && (
         <CreateTaskModal
           columnId={column._id}
           boardId={column.board}
+          projectId={projectId}          // ✅ Forward projectId for member loading
           onClose={() => setShowCreateTask(false)}
         />
       )}

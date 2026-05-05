@@ -1,3 +1,4 @@
+//src/store/index.js
 import { configureStore }    from '@reduxjs/toolkit';
 import { setupListeners }    from '@reduxjs/toolkit/query';
 import {
@@ -11,7 +12,7 @@ const createNoopStorage = () => ({
   removeItem: (_key)        => Promise.resolve(),
 });
 
-// ✅ SSR-safe storage
+// SSR-safe storage
 const storage =
   typeof window !== 'undefined'
     ? require('redux-persist/lib/storage').default
@@ -20,6 +21,7 @@ const storage =
 import authReducer         from './slices/authSlice';
 import projectReducer      from './slices/projectSlice';
 import boardReducer        from './slices/boardSlice';
+import taskReducer         from './slices/taskSlice';         // ✅ ADDED
 import notificationReducer from './slices/notificationSlice';
 import { authApi }         from './api/authApi';
 import { projectApi }      from './api/projectApi';
@@ -39,6 +41,7 @@ export const store = configureStore({
     auth          : persistReducer(authPersistConfig, authReducer),
     projects      : projectReducer,
     board         : boardReducer,
+    tasks         : taskReducer,          // ✅ ADDED — fixes "state.tasks is undefined"
     notifications : notificationReducer,
     [authApi.reducerPath]        : authApi.reducer,
     [projectApi.reducerPath]     : projectApi.reducer,
@@ -62,6 +65,5 @@ export const store = configureStore({
     ),
 });
 
-// ✅ NO store.subscribe() needed — Navbar handles cache clearing on logout
 export const persistor = persistStore(store);
 setupListeners(store.dispatch);
