@@ -216,4 +216,4 @@ vercel --prod
 
 ## 📄 License
 
-MIT © 2024 ProFlow
+Hossam Hassan © 2026 ProFlow
